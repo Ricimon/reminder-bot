@@ -280,6 +280,8 @@ class BotClient(discord.AutoShardedClient):
         else:
             return False
 
+        command = command.lower()
+
         if command in self.commands.keys():
             if server is not None and not message.content.startswith(('{}help'.format(prefix), '{}blacklist'.format(prefix))):
 
