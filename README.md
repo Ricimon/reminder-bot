@@ -8,7 +8,7 @@
 
 * Python 3.6 or 3.7
 * MySQL 8+
-* poetry
+* Poetry
 	* pymysql, discord.py>=1.3.0a, pytz, dateparser, sqlalchemy
 * Rust 1.31 with Cargo (for compilation only)
 
@@ -33,8 +33,8 @@ CREATE DATABASE reminders;
 token =
 dbl_token =
 patreon_enabled = no
-patreon_server =
-patreon_role =
+patreon_server = 0
+patreon_role = 0
 strings_location = ./languages/
 local_timezone = UTC
 
@@ -47,7 +47,7 @@ database = reminders
 
 * Insert values into `token` and `user` for your MySQL setup and your bot's authorization token (can be found at https://discordapp.com/developers/applications)
 * Set `local_timezone` to a time region that is representative of your local time. For example, for the UK this is *Europe/London*
-* `poetry install` to install python package dependencies with poetry
+* `poetry install` to install python package dependencies with Poetry
 * `poetry run python main.py` to test that all's okay
 
 * Clone down the postman (https://github.com/reminder-bot/postman-rs)
