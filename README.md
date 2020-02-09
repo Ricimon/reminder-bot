@@ -6,9 +6,10 @@
 
 #### Deps:
 
-* Python 3.6+
+* Python 3.6 or 3.7
 * MySQL 8+
-* pymysql, discord.py>=1.3.0a, pytz, dateparser, sqlalchemy
+* poetry
+	* pymysql, discord.py>=1.3.0a, pytz, dateparser, sqlalchemy
 * Rust 1.31 with Cargo (for compilation only)
 
 #### Optional Deps:
@@ -39,14 +40,15 @@ local_timezone = UTC
 
 [MYSQL]
 user = 
-;passwd =
+passwd =
 host = localhost
 database = reminders
 ```
 
 * Insert values into `token` and `user` for your MySQL setup and your bot's authorization token (can be found at https://discordapp.com/developers/applications)
 * Set `local_timezone` to a time region that is representative of your local time. For example, for the UK this is *Europe/London*
-* `python3 main.py` to test all that's okay
+* `poetry install` to install python package dependencies with poetry
+* `poetry run python main.py` to test that all's okay
 
 * Clone down the postman (https://github.com/reminder-bot/postman-rs)
 * Move to the directory and perform `cargo build --release` to compile it
