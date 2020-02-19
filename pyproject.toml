@@ -13,6 +13,7 @@ pytz = "^2019.3"
 pymysql = "^0.9.3"
 
 [tool.poetry.dev-dependencies]
+Mypy = "^0.761"
 
 [build-system]
 requires = ["poetry>=0.12"]
