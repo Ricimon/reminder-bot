@@ -1,8 +1,9 @@
 import discord
+import sqlalchemy
 
 from types import FunctionType
 from enums import PermissionLevels, CreateReminderResponse
-from models import Guild, User, Language, session, ENGLISH_STRINGS
+from models import Guild, User, Language, ENGLISH_STRINGS
 import typing
 
 
@@ -14,7 +15,7 @@ class Command():
         self.permission_level = permission_level
 
 class Preferences():
-    def __init__(self, server: Guild, user: User):
+    def __init__(self, server: Guild, user: User, session: sqlalchemy.orm.session.Session):
 
         self._user: User = user
         self._server: Guild = server
