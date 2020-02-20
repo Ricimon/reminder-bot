@@ -188,7 +188,7 @@ class BotClient(discord.AutoShardedClient):
 
 
     async def on_error(self, *a, **k):
-        if self.Session is not None:
+        if self.session is not None:
             self.session.rollback()
         raise
 
