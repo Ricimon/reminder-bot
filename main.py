@@ -74,15 +74,18 @@ class BotClient(discord.AutoShardedClient):
 
     @contextmanager
     def get_session(self):
-        self.session = Session()
+        session_already_exists = self.session is not None
+        if not session_already_exists:
+            self.session = Session()
         try:
             yield self.session
         except:
             self.session.rollback()
             raise
         finally:
-            Session.remove()
-            self.session = None
+            if not session_already_exists:
+                Session.remove()
+                self.session = None
 
 
     async def do_blocking(self, method):
