@@ -454,7 +454,13 @@ class BotClient(discord.AutoShardedClient):
 
         time_crop = stripped.split(server.language.get_string(self.session, 'natural/send'))[0]
         message_crop = stripped.split(server.language.get_string(self.session, 'natural/send'), 1)[1]
-        datetime_obj = await self.do_blocking( partial(dateparser.parse, time_crop, settings={'TIMEZONE': server.timezone, 'TO_TIMEZONE': self.config.localzone}) )
+        datetime_obj = await self.do_blocking( partial(dateparser.parse, time_crop, settings =
+            {
+             'TIMEZONE': server.timezone,
+             'TO_TIMEZONE': self.config.localzone,
+             'RELATIVE_BASE': datetime.now(pytz.timezone(server.timezone)),
+             'PREFER_DATES_FROM': 'future'
+            }))
 
         if datetime_obj is None:
             await message.channel.send(embed=discord.Embed(description=server.language.get_string(self.session, 'natural/invalid_time')))
