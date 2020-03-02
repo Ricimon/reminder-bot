@@ -2,7 +2,7 @@ import asyncio
 import concurrent.futures
 import re
 import typing
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import partial
 from json import dumps as json_dump
 from time import time as unix_time
@@ -510,8 +510,18 @@ class BotClient(discord.AutoShardedClient):
             result: ReminderInformation = responses[0]
             string: str = NATURAL_STRINGS.get(result.status, REMIND_STRINGS[result.status])
 
+            # hacky way of showing offset as days, hours, minutes, seconds without changing languages/ file
+            td = timedelta(seconds=int(round(result.time - unix_time())))
+            hours, remainder = divmod(td.seconds, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            offset: str = ''
+            if td.days != 0: offset += f"{td.days} day{'s' if td.days > 1 else ''}, "
+            if hours != 0: offset += f"{hours} hour{'s' if hours > 1 else ''}, "
+            if minutes != 0: offset += f"{minutes} minute{'s' if minutes > 1 else ''}, "
+            offset += str(seconds)
+
             response = server.language.get_string(self.session, string).format(location=result.location.mention,
-                                                                               offset=int(result.time - unix_time()),
+                                                                               offset=offset,
                                                                                min_interval=MIN_INTERVAL, max_time=MAX_TIME_DAYS)
 
             await message.channel.send(embed=discord.Embed(description=response))

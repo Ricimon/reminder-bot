@@ -100,6 +100,9 @@ ENV/
 # mypy
 .mypy_cache/
 
+# JetBrains intellij
+.idea/
+
 
 # project specific files
 token
