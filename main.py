@@ -509,7 +509,9 @@ class BotClient(discord.AutoShardedClient):
             string: str = NATURAL_STRINGS.get(result.status, REMIND_STRINGS[result.status])
 
             # hacky way of showing offset as days, hours, minutes, seconds without changing languages/ file
-            td = timedelta(seconds=int(round(result.time - unix_time())))
+            delta_seconds = int(round(result.time - unix_time()))
+            delta_seconds = max(delta_seconds, 0)   # don't go negative
+            td = timedelta(seconds=delta_seconds)
             hours, remainder = divmod(td.seconds, 3600)
             minutes, seconds = divmod(remainder, 60)
             offset: str = ''
