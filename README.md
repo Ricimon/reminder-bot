@@ -49,6 +49,7 @@ database = reminders
 * Set `local_timezone` to a time region that is representative of your local time. For example, for the UK this is *Europe/London*
 * `poetry install` to install python package dependencies with Poetry
 * `poetry run python main.py` to test that all's okay
+* `poetry run python languages/to_database.py` to set up the database
 
 * Clone down the postman (https://github.com/reminder-bot/postman-rs)
 * Move to the directory and perform `cargo build --release` to compile it
