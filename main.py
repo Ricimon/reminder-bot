@@ -14,7 +14,7 @@ import pytz
 from config import Config
 from consts import *
 from models import Reminder, Todo, Blacklist, Timer, ChannelNudge, \
-    CommandRestriction, Session
+    CommandRestriction, Message, Session
 from passers import *
 from time_extractor import TimeExtractor, InvalidTime
 
@@ -647,7 +647,7 @@ class BotClient(discord.AutoShardedClient):
 
             else:
                 reminder = Reminder(
-                    message=text,
+                    message=Message(content=text),
                     channel=channel.id,
                     time=time,
                     webhook=url,
@@ -659,7 +659,7 @@ class BotClient(discord.AutoShardedClient):
 
         else:
             r = Reminder(
-                message=text,
+                message=Message(content=text),
                 channel=channel.id,
                 time=time,
                 webhook=url,
