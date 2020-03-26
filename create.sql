@@ -1,9 +1,26 @@
+USE reminders;
+
+CREATE TABLE reminders.users (
+    id INT UNSIGNED AUTO_INCREMENT UNIQUE NOT NULL,
+    user BIGINT UNSIGNED UNIQUE NOT NULL,
+
+    language VARCHAR(2) DEFAULT 'EN' NOT NULL,
+    timezone VARCHAR(32),
+    allowed_dm BOOLEAN DEFAULT 1 NOT NULL,
+
+    patreon BOOL NOT NULL DEFAULT 0,
+    dm_channel BIGINT UNSIGNED UNIQUE,
+    name VARCHAR(37) UNIQUE,
+
+    PRIMARY KEY (id)
+);
+
 CREATE TABLE reminders.embeds (
     id INT UNSIGNED AUTO_INCREMENT UNIQUE NOT NULL,
 
     title VARCHAR(256) NOT NULL DEFAULT '',
     description VARCHAR(2048) NOT NULL DEFAULT '',
-    color MEDIUMINT UNSIGNED,
+    color MEDIUMINT UNSIGNED NOT NULL DEFAULT 0x0,
 
     PRIMARY KEY (id)
 );
@@ -12,10 +29,15 @@ CREATE TABLE reminders.messages (
     id INT UNSIGNED AUTO_INCREMENT UNIQUE NOT NULL,
 
     content VARCHAR(2048) NOT NULL DEFAULT '',
-    embed INT UNSIGNED,
+    embed_id INT UNSIGNED,
+
+    on_demand BOOL NOT NULL DEFAULT 1,
+
+    owner_id INT UNSIGNED,
 
     PRIMARY KEY (id),
-    FOREIGN KEY (embed) REFERENCES reminders.embeds(id)
+    FOREIGN KEY (embed_id) REFERENCES reminders.embeds(id),
+    FOREIGN KEY (owner_id) REFERENCES reminders.users(id)
 );
 
 CREATE TABLE reminders.reminders (
@@ -39,6 +61,14 @@ CREATE TABLE reminders.reminders (
     FOREIGN KEY (message_id) REFERENCES reminders.messages(id)
 );
 
+CREATE TRIGGER message_cleanup AFTER DELETE ON reminders.reminders
+FOR EACH ROW
+    DELETE FROM reminders.messages WHERE id = OLD.message_id AND on_demand = 1;
+
+CREATE TRIGGER embed_cleanup AFTER DELETE ON reminders.messages
+FOR EACH ROW
+    DELETE FROM reminders.embeds WHERE id = OLD.embed_id AND OLD.on_demand = 1;
+
 CREATE TABLE reminders.guilds (
     guild BIGINT UNSIGNED UNIQUE NOT NULL,
 
@@ -46,20 +76,6 @@ CREATE TABLE reminders.guilds (
     timezone VARCHAR(32) DEFAULT 'UTC' NOT NULL,
 
     PRIMARY KEY (guild)
-);
-
-CREATE TABLE reminders.users (
-    id INT UNSIGNED AUTO_INCREMENT UNIQUE NOT NULL,
-    user BIGINT UNSIGNED UNIQUE NOT NULL,
-
-    language VARCHAR(2) DEFAULT 'EN' NOT NULL,
-    timezone VARCHAR(32),
-    allowed_dm BOOLEAN DEFAULT 1 NOT NULL,
-
-    dm_channel BIGINT UNSIGNED UNIQUE,
-    name VARCHAR(37) UNIQUE,
-
-    PRIMARY KEY (id)
 );
 
 CREATE TABLE reminders.todos (
