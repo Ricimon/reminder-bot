@@ -1,0 +1,24 @@
+#!/bin/sh
+MUSER="$1"
+MPASS="$2"
+MDB="reminders"
+
+# Detect paths
+MYSQL=$(which mysql)
+AWK=$(which awk)
+GREP=$(which grep)
+
+if [ $# -ne 2 ]
+then
+	echo "Usage: $0 {MY-SQL-User-Name} {MySQL-User-Password}"
+	echo "Drops all tables from the MySQL (MariaDB) reminders database, used as a last ditch effort for upgrading"
+	exit 1
+fi
+
+TABLES=$($MYSQL -u $MUSER -p$MPASS $MDB -e 'SHOW TABLES' | $AWK '{ print $1}' | $GREP -v '^Tables' )
+
+for t in $TABLES
+do
+	echo "Deleting $t table from $MDB database..."
+	$MYSQL -u $MUSER -p$MPASS $MDB -e "SET FOREIGN_KEY_CHECKS=0;DROP TABLE $t"
+done

@@ -12,6 +12,27 @@ from consts import ALL_CHARACTERS
 Base = declarative_base()
 
 
+class User(Base):
+    __tablename__ = 'users'
+
+    id = Column(Integer, primary_key=True, nullable=False)
+    user = Column(BigInteger, nullable=False)
+
+    language = Column( String(2), default='EN', nullable=False )
+    timezone = Column( String(32), nullable=True )
+    allowed_dm = Column( Boolean, default=True, nullable=False )
+
+    patreon = Column( Boolean, nullable=False, default=False )
+    dm_channel = Column(BigInteger)
+    name = Column(String(37))  # sized off 32 char username + # + 4 char discriminator
+
+    def __repr__(self):
+        return self.name or str(self.user)
+
+    def __str__(self):
+        return self.name or str(self.user)
+
+
 class Embed(Base):
     __tablename__ = 'embeds'
 
@@ -34,7 +55,7 @@ class Message(Base):
 
     on_demand = Column(Boolean, nullable=False, default=True)
 
-    owner_id = Column(Integer, ForeignKey('User.id'))
+    owner_id = Column(Integer, ForeignKey(User.id))
 
 
 class Reminder(Base):
@@ -87,27 +108,6 @@ class Guild(Base):
     timezone = Column( String(32), default='UTC', nullable=False )
 
     command_restrictions = relationship('CommandRestriction', backref='guild', lazy='dynamic')
-
-
-class User(Base):
-    __tablename__ = 'users'
-
-    id = Column(Integer, primary_key=True, nullable=False)
-    user = Column(BigInteger, nullable=False)
-
-    language = Column( String(2), default='EN', nullable=False )
-    timezone = Column( String(32), nullable=True )
-    allowed_dm = Column( Boolean, default=True, nullable=False )
-
-    patreon = Column( Boolean, nullable=False, default=False )
-    dm_channel = Column(BigInteger)
-    name = Column(String(37))  # sized off 32 char username + # + 4 char discriminator
-
-    def __repr__(self):
-        return self.name or str(self.user)
-
-    def __str__(self):
-        return self.name or str(self.user)
 
 
 class Todo(Base):
