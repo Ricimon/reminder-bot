@@ -1,6 +1,6 @@
 # Reminder Bot
 
-## A bot for doing reminders
+## A Discord bot for doing reminders
 
 ### Installing
 
@@ -9,6 +9,7 @@
 * Python 3.6 or 3.7
 * MySQL 8+
 * libmysqlclient21 and libmysqlclient-dev
+	* *Debian* `sudo apt-get install default-libmysqlclient-dev`
 * Poetry
 	* pymysql, discord.py>=1.3.0a, pytz, dateparser, sqlalchemy
 * Rust 1.42 with Cargo (for compilation only)
@@ -52,8 +53,7 @@ database = reminders
 * `poetry run python main.py` to test that all's okay
 * `poetry run python languages/to_database.py` to set up the database
 
-* Clone down the postman (https://github.com/reminder-bot/postman-rs)
-* Move to the directory and perform `cargo build --release` to compile it
+* Move to the postman directory (`cd postman-rs`) and perform `cargo build --release` to compile it
 * Create a file `.env` and fill with the following:
 
 ```

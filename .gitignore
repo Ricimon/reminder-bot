@@ -112,4 +112,3 @@ config.ini
 terminal.glue
 data.msgpack.zlib
 alembic.ini
-postman-rs/
