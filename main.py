@@ -204,50 +204,6 @@ class BotClient(discord.AutoShardedClient):
     # noinspection PyBroadException
     async def on_message(self, message):
 
-<<<<<<< HEAD
-        if message.author.bot or message.content is None:
-            return
-
-        with self.get_session() as session:
-            if session.query(User).filter(User.user == message.author.id).first() is None:
-
-                user = User(user=message.author.id, name='{}'.format(message.author),
-                            dm_channel=(await message.author.create_dm()).id)
-
-                session.add(user)
-                try:
-                    session.commit()
-
-                except:
-                    return
-
-            if message.guild is not None and session.query(Guild).get(message.guild.id) is None:
-
-                server = Guild(guild=message.guild.id)
-
-                session.add(server)
-                try:
-                    session.commit()
-
-                except:
-                    return
-
-            server = None if message.guild is None else session.query(Guild).get(message.guild.id)
-            user = session.query(User).filter(User.user == message.author.id).first()
-
-            user.name = '{}'.format(message.author)
-
-            if user.dm_channel is None:
-                user.dm_channel = (await message.author.create_dm()).id
-
-            if message.guild is None or message.channel.permissions_for(message.guild.me).send_messages:
-                try:
-                    if await self.get_cmd(message, server, user):
-                        print('Command: {}'.format(message.content))
-
-                except discord.errors.Forbidden:
-                    await message.channel.send('Insufficient permissions for command')
-=======
         def _check_self_permissions(_channel):
             p = _channel.permissions_for(message.guild.me)
 
@@ -271,7 +227,6 @@ class BotClient(discord.AutoShardedClient):
                     self.session.flush()
 
             return _user
->>>>>>> upstream/master
 
         if message.author.bot or \
                 message.content is None or \

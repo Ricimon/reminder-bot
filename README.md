@@ -6,12 +6,12 @@
 
 #### Deps:
 
-* Python 3.6 or 3.7
+* Python 3.8+
 * MySQL 8+
 * libmysqlclient21 and libmysqlclient-dev
 	* *Debian* `sudo apt-get install default-libmysqlclient-dev`
 * Poetry
-	* pymysql, discord.py>=1.3.0a, pytz, dateparser, sqlalchemy
+	* pymysql, discord.py>=1.3.0a, pytz, dateparser, sqlalchemy, tinyconf
 * Rust 1.42 with Cargo (for compilation only)
 
 #### Optional Deps:
