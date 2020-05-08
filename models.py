@@ -1,7 +1,8 @@
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import Column, Integer, BigInteger, String, Text, Boolean, Table, ForeignKey
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, scoped_session, relationship
+from sqlalchemy.orm import sessionmaker, scoped_session, relationship, backref
+from sqlalchemy.dialects.mysql import BIGINT, MEDIUMINT, SMALLINT, INTEGER as INT
 import configparser
 import time
 import typing
@@ -10,6 +11,133 @@ import secrets
 from consts import ALL_CHARACTERS
 
 Base = declarative_base()
+
+guild_users = Table('guild_users',
+                    Base.metadata,
+                    Column('guild', INT(unsigned=True), ForeignKey('guilds.id')),
+                    Column('user', INT(unsigned=True), ForeignKey('users.id')),
+                    )
+
+
+class Guild(Base):
+    __tablename__ = 'guilds'
+
+    id = Column(INT(unsigned=True), primary_key=True)
+    guild = Column(BIGINT(unsigned=True), unique=True)
+
+    prefix = Column(String(5), default='$', nullable=False)
+    timezone = Column(String(32), default='UTC', nullable=False)
+
+    name = Column(String(100))
+
+    users = relationship(
+        'User', secondary=guild_users,
+        primaryjoin=(guild_users.c.guild == id),
+        secondaryjoin='(guild_users.c.user == User.id)',
+        backref=backref('guilds', lazy='dynamic'), lazy='dynamic'
+    )
+
+    # populated later in file
+    command_restrictions = None
+
+
+class Channel(Base):
+    __tablename__ = 'channels'
+
+    id = Column(INT(unsigned=True), primary_key=True)
+    channel = Column(BIGINT(unsigned=True), unique=True)
+
+    name = Column(String(100))
+
+    nudge = Column(SMALLINT, nullable=False, default=0)
+    blacklisted = Column(Boolean, nullable=False, default=False)
+
+    webhook_id = Column(BIGINT(unsigned=True), unique=True)
+    webhook_token = Column(Text)
+
+    guild_id = Column(INT(unsigned=True), ForeignKey(Guild.id, ondelete='CASCADE'))
+    guild = relationship(Guild, backref='channels')
+
+    def __repr__(self):
+        return '<#{}>'.format(self.channel)
+
+    def __str__(self):
+        return '<#{}>'.format(self.channel)
+
+    @classmethod
+    def get_or_create(cls, finding_channel) -> ('Channel', bool):
+        c = session.query(cls).filter(cls.channel == finding_channel.id).first()
+        new = False
+
+        if c is None:
+            g = session.query(Guild).filter(Guild.guild == finding_channel.guild.id).first()
+
+            gid = None if g is None else g.id
+
+            c = Channel(
+                channel=finding_channel.id,
+                name=finding_channel.name,
+                guild_id=gid
+            )
+
+            session.add(c)
+            new = True
+
+        else:
+            c.name = finding_channel.name
+
+        session.flush()
+        return c, new
+
+    async def attach_webhook(self, channel):
+        if (self.webhook_token or self.webhook_id) is None:
+            hook = await channel.create_webhook(name='Reminders')
+
+            self.webhook_token = hook.token
+            self.webhook_id = hook.id
+
+
+class Role(Base):
+    __tablename__ = 'roles'
+
+    id = Column(INT(unsigned=True), primary_key=True)
+    name = Column(String(100))
+
+    role = Column(BIGINT(unsigned=True), unique=True, nullable=False)
+    guild_id = Column(INT(unsigned=True), ForeignKey(Guild.id), nullable=False)
+
+
+class User(Base):
+    __tablename__ = 'users'
+
+    id = Column(INT(unsigned=True), primary_key=True, nullable=False)
+    user = Column(BIGINT(unsigned=True), nullable=False, unique=True)
+
+    name = Column(String(37), nullable=False)  # sized off 32 char username + # + 4 char discriminator
+
+    language = Column(String(2), default='EN', nullable=False)
+    timezone = Column(String(32))
+    allowed_dm = Column(Boolean, default=True, nullable=False)
+
+    patreon = Column(Boolean, nullable=False, default=False)
+    dm_channel = Column(INT(unsigned=True), ForeignKey('channels.id'), nullable=False)
+    channel = relationship(Channel)
+
+    def __repr__(self):
+        return self.name or str(self.user)
+
+    def __str__(self):
+        return self.name or str(self.user)
+
+    @classmethod
+    def from_discord(cls, finding_user):
+        return session.query(cls).filter(cls.user == finding_user.id).first()
+
+    async def update_details(self, new_details):
+        self.name = '{}#{}'.format(new_details.name, new_details.discriminator)
+
+        if self.dm_channel is None:
+            self.dm_channel = (await new_details.create_dm()).id
 
 
 class User(Base):
@@ -36,40 +164,38 @@ class User(Base):
 class Embed(Base):
     __tablename__ = 'embeds'
 
-    id = Column(Integer, primary_key=True)
+    id = Column(INT(unsigned=True), primary_key=True)
 
     title = Column(String(256), nullable=False, default='')
     description = Column(String(2048), nullable=False, default='')
-    color = Column(Integer)
+    color = Column(MEDIUMINT(unsigned=True))
 
 
 class Message(Base):
     __tablename__ = 'messages'
 
-    id = Column(Integer, primary_key=True)
+    id = Column(INT(unsigned=True), primary_key=True)
 
     content = Column(String(2048), nullable=False, default='')
 
-    embed_id = Column(Integer, ForeignKey(Embed.id))
+    embed_id = Column(INT(unsigned=True), ForeignKey(Embed.id))
     embed = relationship(Embed)
-
-    on_demand = Column(Boolean, nullable=False, default=True)
-
-    owner_id = Column(Integer, ForeignKey(User.id))
 
 
 class Reminder(Base):
     __tablename__ = 'reminders'
 
-    id = Column(Integer, primary_key=True)
+    id = Column(INT(unsigned=True), primary_key=True)
     uid = Column(String(64), default=lambda: Reminder.create_uid(), unique=True)
 
-    message_id = Column(Integer, ForeignKey(Message.id), nullable=False)
+    name = Column(String(24), default='Reminder')
+
+    message_id = Column(INT(unsigned=True), ForeignKey(Message.id), nullable=False)
     message = relationship(Message)
 
-    channel = Column(BigInteger)
-    time = Column(BigInteger)
-    webhook = Column(String(256))
+    channel_id = Column(INT(unsigned=True), ForeignKey(Channel.id), nullable=True)
+
+    time = Column(INT(unsigned=True))
     enabled = Column(Boolean, nullable=False, default=True)
 
     avatar = Column(String(512),
@@ -78,7 +204,7 @@ class Reminder(Base):
     username = Column(String(32), default='Reminder', nullable=False)
 
     method = Column(String(9))
-    interval = Column(Integer)
+    interval = Column(INT(unsigned=True))
 
     @staticmethod
     def create_uid() -> str:
@@ -99,32 +225,20 @@ class Reminder(Base):
             return ''
 
 
-class Guild(Base):
-    __tablename__ = 'guilds'
-
-    guild = Column( BigInteger, primary_key=True, autoincrement=False )
-
-    prefix = Column( String(5), default='$', nullable=False )
-    timezone = Column( String(32), default='UTC', nullable=False )
-
-    command_restrictions = relationship('CommandRestriction', backref='guild', lazy='dynamic')
+Channel.reminders = relationship(Reminder, backref='channel', lazy='dynamic')
 
 
 class Todo(Base):
     __tablename__ = 'todos'
 
-    id = Column(Integer, primary_key=True)
-    owner = Column(BigInteger, nullable=False)
-    value = Column(Text, nullable=False)
+    id = Column(INT(unsigned=True), primary_key=True)
 
+    user_id = Column(INT(unsigned=True), ForeignKey(User.id))
+    user = relationship(User, backref='todo_list')
+    guild_id = Column(INT(unsigned=True), ForeignKey(Guild.id))
+    guild = relationship(Guild, backref='todo_list')
 
-class Blacklist(Base):
-    __tablename__ = 'blacklists'
-
-    id = Column(Integer, primary_key=True)
-
-    channel = Column(BigInteger, nullable=False, unique=True)
-    guild_id = Column(BigInteger, ForeignKey(Guild.guild, ondelete='CASCADE'), nullable=False)
+    value = Column(String(2000), nullable=False)
 
 
 class Timer(Base):
@@ -133,8 +247,8 @@ class Timer(Base):
     id = Column(Integer, primary_key=True)
 
     start_time = Column(Integer, default=time.time, nullable=False)
-    name = Column( String(32), nullable=False )
-    owner = Column( BigInteger, nullable=False )
+    name = Column(String(32), nullable=False)
+    owner = Column(BigInteger, nullable=False)
 
 
 class Language(Base):
@@ -142,23 +256,14 @@ class Language(Base):
 
     id = Column(Integer, primary_key=True)
 
-    name = Column( String(20), nullable=False, unique=True )
-    code = Column( String(2), nullable=False, unique=True )
+    name = Column(String(20), nullable=False, unique=True)
+    code = Column(String(2), nullable=False, unique=True)
 
     def get_string(self, session, string):
         s = session.query(Strings).filter(Strings.c.name == string)
         req = getattr(s.first(), 'value_{}'.format(self.code))
 
         return req if req is not None else s.first().value_EN
-
-
-class ChannelNudge(Base):
-    __tablename__ = 'nudge_channels'
-
-    id = Column(Integer, primary_key=True)
-
-    channel = Column(BigInteger, unique=True, nullable=False)
-    time = Column(Integer, nullable=False)
 
 
 class CommandRestriction(Base):
@@ -170,6 +275,8 @@ class CommandRestriction(Base):
     role = Column(BigInteger, nullable=False)
     command = Column(String(16))
 
+
+Guild.command_restrictions = relationship(CommandRestriction, backref='guild', lazy='dynamic')
 
 config = configparser.ConfigParser()
 config.read('config.ini')

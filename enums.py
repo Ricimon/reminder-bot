@@ -1,4 +1,4 @@
-from enum import Enum
+from enum import Enum, IntEnum
 
 
 # enumerate possible error types from the remind and natural commands
@@ -12,10 +12,15 @@ class CreateReminderResponse(Enum):
 
 
 # enumerate possible permission levels for command execution
-class PermissionLevels(Enum):
+class PermissionLevels(IntEnum):
     UNRESTRICTED = 0
     MANAGED = 1
     RESTRICTED = 2
+
+    def __str__(self):
+        strings = ('', 'no_perms_managed', 'no_perms_restricted')
+
+        return strings[self.value]
 
 
 class TimeExtractionTypes(Enum):

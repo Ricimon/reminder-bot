@@ -1,5 +1,6 @@
 import asyncio
 import concurrent.futures
+import itertools
 import re
 from datetime import datetime, timedelta
 from functools import partial
@@ -13,10 +14,11 @@ import pytz
 
 from config import Config
 from consts import *
-from models import Reminder, Todo, Blacklist, Timer, ChannelNudge, \
-    CommandRestriction, Message, Session
+from models import Reminder, Todo, Timer, Message, Channel, Session
 from passers import *
 from time_extractor import TimeExtractor, InvalidTime
+
+THEME_COLOR = 0x8fb677
 
 
 class BotClient(discord.AutoShardedClient):
@@ -25,40 +27,48 @@ class BotClient(discord.AutoShardedClient):
 
         self.commands: typing.Dict[str, Command] = {
 
-            'help': Command(self.help),
-            'info': Command(self.info),
-            'donate': Command(self.donate),
+            'help': Command('help', self.help, blacklists=False),
+            'info': Command('info', self.info),
+            'donate': Command('donate', self.donate),
 
-            'prefix': Command(self.change_prefix, False, PermissionLevels.RESTRICTED),
-            'blacklist': Command(self.blacklist, False, PermissionLevels.RESTRICTED),
-            'restrict': Command(self.restrict, False, PermissionLevels.RESTRICTED),
+            'prefix': Command('prefix', self.change_prefix, False, PermissionLevels.RESTRICTED),
+            'blacklist': Command('blacklist', self.blacklist, False, PermissionLevels.RESTRICTED, blacklists=False),
+            # TODO: remodel restriction table with FKs for role table
+            'restrict': Command('restrict', self.restrict, False, PermissionLevels.RESTRICTED),
 
-            'timezone': Command(self.set_timezone),
-            'lang': Command(self.set_language),
-            'clock': Command(self.clock),
+            'timezone': Command('timezone', self.set_timezone),
+            'lang': Command('lang', self.set_language),
+            'clock': Command('clock', self.clock),
 
-            'offset': Command(self.offset_reminders, True, PermissionLevels.RESTRICTED),
-            'nudge': Command(self.nudge_channel, True, PermissionLevels.RESTRICTED),
+            'offset': Command('offset', self.offset_reminders, True, PermissionLevels.RESTRICTED),
+            'nudge': Command('nudge', self.nudge_channel, True, PermissionLevels.RESTRICTED),
 
-            'natural': Command(self.natural, True, PermissionLevels.MANAGED),
-            'n': Command(self.natural, True, PermissionLevels.MANAGED),
-            'remind': Command(self.remind, True, PermissionLevels.MANAGED),
-            'r': Command(self.remind, True, PermissionLevels.MANAGED),
-            'interval': Command(self.remind, True, PermissionLevels.MANAGED),
-            'timer': Command(self.timer, False, PermissionLevels.MANAGED),
-            'del': Command(self.delete, True, PermissionLevels.MANAGED),
-            'look': Command(self.look, True, PermissionLevels.MANAGED),
+            'natural': Command('natural', self.natural, True, PermissionLevels.MANAGED),
+            'n': Command('natural', self.natural, True, PermissionLevels.MANAGED),
+            'remind': Command('remind', self.remind_cmd, True, PermissionLevels.MANAGED),
+            'r': Command('remind', self.remind_cmd, True, PermissionLevels.MANAGED),
+            'interval': Command('interval', self.interval_cmd, True, PermissionLevels.MANAGED),
+            # TODO: remodel timer table with FKs for guild table
+            'timer': Command('timer', self.timer, False, PermissionLevels.MANAGED),
+            'del': Command('del', self.delete, True, PermissionLevels.MANAGED),
+            # TODO: allow looking at reminder attributes in full by name
+            'look': Command('look', self.look, True, PermissionLevels.MANAGED),
 
-            'todos': Command(self.todo, False, PermissionLevels.MANAGED),
-            'todo': Command(self.todo),
+            'todos': Command('todos', self.todo, False, PermissionLevels.MANAGED),
+            'todo': Command('todo', self.todo),
 
-            'ping': Command(self.time_stats),
+            'ping': Command('ping', self.time_stats)
         }
 
-        # used in restrict command for filtration
-        self.max_command_length = max(len(x) for x in self.commands.keys())
+        self.match_string = None
 
-        self.config: Config = Config()
+        self.command_names = set(self.commands.keys())
+        self.joined_names = '|'.join(self.command_names)
+
+        # used in restrict command for filtration
+        self.max_command_length = max(len(x) for x in self.command_names)
+
+        self.config: Config = Config(filename='config.ini')
 
         self.executor: concurrent.futures.ThreadPoolExecutor = concurrent.futures.ThreadPoolExecutor()
         self.c_session: typing.Optional[aiohttp.ClientSession] = None
@@ -89,52 +99,27 @@ class BotClient(discord.AutoShardedClient):
         a, _ = await asyncio.wait([self.loop.run_in_executor(self.executor, method)])
         return [x.result() for x in a][0]
 
-    async def find_member(self, member_id: int, context_guild: typing.Optional[discord.Guild]):
-            u: User = self.session.query(User).get(member_id)
+    async def find_and_create_member(self, member_id: int, context_guild: typing.Optional[discord.Guild]) \
+            -> typing.Optional[User]:
+        u: User = self.session.query(User).filter(User.user == member_id).first()
 
-            if u is None and context_guild is not None:
-                m = context_guild.get_member(member_id) or self.get_user(member_id)
+        if u is None and context_guild is not None:
+            m = context_guild.get_member(member_id) or self.get_user(member_id)
 
-                if m is not None:
-                    u = User(user=m.id, name='{}'.format(m), dm_channel=(await m.create_dm()).id)
+            if m is not None:
+                c = Channel(channel=(await m.create_dm()).id)
+                self.session.add(c)
+                self.session.flush()
 
-                    self.session.add(u)
-                    self.session.commit()
+                u = User(user=m.id, name='{}'.format(m), dm_channel=c.id)
 
-            return u
+                self.session.add(u)
+                self.session.commit()
 
-    async def clean_string(self, string: str, guild: discord.Guild) -> str:
-        if guild is None:
-            return string
-
-        else:
-            parts = ['']
-            for char in string:
-                if char in '<>':
-                    parts.append(char)
-                else:
-                    parts[-1] += char
-
-            new = []
-            for piece in parts:
-                new_piece = piece
-                if len(piece) > 3 and piece[1] == '@' and all(x in '0123456789' for x in piece[3:]):
-                    if piece[2] in '0123456789!':
-                        uid = int(''.join(x for x in piece if x in '0123456789'))
-                        user = await self.find_member(uid, guild)
-                        new_piece = '`@{}`'.format(user)
-
-                    elif piece[2] == '&':
-                        rid = int(''.join(x for x in piece if x in '0123456789'))
-                        role = guild.get_role(rid)
-                        new_piece = '`@@{}`'.format(role)
-
-                new.append(new_piece)
-
-            return ''.join(new).replace('@everyone', '`@everyone`').replace('@here', '`@here`')
+        return u
 
     async def is_patron(self, member_id) -> bool:
-        if self.config.patreon:
+        if self.config.patreon_enabled:
 
             url = 'https://discordapp.com/api/v6/guilds/{}/members/{}'.format(self.config.patreon_server, member_id)
 
@@ -152,7 +137,7 @@ class BotClient(discord.AutoShardedClient):
                 else:
                     return False
 
-            return self.config.donor_role in roles
+            return self.config.patreon_role in roles
 
         else:
             return True
@@ -168,20 +153,6 @@ class BotClient(discord.AutoShardedClient):
             else:
                 continue
 
-    async def time_stats(self, message, *_):
-        uptime: float = unix_time() - self.start_time
-
-        message_ts: float = message.created_at.timestamp()
-
-        m: discord.Message = await message.channel.send('.')
-
-        ping: float = m.created_at.timestamp() - message_ts
-
-        await m.edit(content='''
-        Uptime: {}s
-        Ping: {}ms
-        '''.format(round(uptime), round(ping * 1000)))
-
     async def on_error(self, *a, **k):
         if self.session is not None:
             self.session.rollback()
@@ -193,17 +164,25 @@ class BotClient(discord.AutoShardedClient):
         print(self.user.name)
         print(self.user.id)
 
+        self.match_string = \
+            r'(?:(?:<@ID>\s+)|(?:<@!ID>\s+)|(?P<prefix>\S{1,5}?))(?P<cmd>COMMANDS)(?:$|\s+(?P<args>.*))' \
+            .replace('ID', str(self.user.id)).replace('COMMANDS', self.joined_names)
+
         self.c_session: aiohttp.client.ClientSession = aiohttp.ClientSession()
 
-        if self.config.patreon:
+        if self.config.patreon_enabled:
             print('Patreon is enabled. Will look for servers {}'.format(self.config.patreon_server))
 
-        print('Local timezone set to *{}*'.format(self.config.localzone))
+        print('Local timezone set to *{}*'.format(self.config.local_timezone))
 
     async def on_guild_join(self, guild):
         await self.send()
 
         await self.welcome(guild)
+
+    # noinspection PyMethodMayBeStatic
+    async def on_guild_channel_delete(self, channel):
+        self.session.query(Channel).filter(Channel.channel == channel.id).delete(synchronize_session='fetch')
 
     async def send(self):
         if self.config.dbl_token:
@@ -225,6 +204,7 @@ class BotClient(discord.AutoShardedClient):
     # noinspection PyBroadException
     async def on_message(self, message):
 
+<<<<<<< HEAD
         if message.author.bot or message.content is None:
             return
 
@@ -267,100 +247,155 @@ class BotClient(discord.AutoShardedClient):
 
                 except discord.errors.Forbidden:
                     await message.channel.send('Insufficient permissions for command')
+=======
+        def _check_self_permissions(_channel):
+            p = _channel.permissions_for(message.guild.me)
 
-    async def get_cmd(self, message, server, user) -> bool:
+            return p.send_messages and p.embed_links
 
-        info: Preferences = Preferences(server, user, self.session)
-        prefix: str = info.prefix
+        async def _get_user(_message):
+            _user = self.session.query(User).filter(User.user == message.author.id).first()
+            if _user is None:
+                dm_channel_id = (await message.author.create_dm()).id
 
-        # noinspection PyUnusedLocal
-        command: str = ''
-        # noinspection PyUnusedLocal
-        stripped: str = ''
+                c = self.session.query(Channel).filter(Channel.channel == dm_channel_id).first()
 
-        if message.content[0:len(prefix)] == prefix:
+                if c is None:
+                    c = Channel(channel=dm_channel_id)
+                    self.session.add(c)
+                    self.session.flush()
 
-            command = (message.content + ' ')[len(prefix):message.content.find(' ')]
-            stripped = (message.content + ' ')[message.content.find(' '):].strip()
+                    _user = User(user=_message.author.id, dm_channel=c.id, name='{}#{}'.format(
+                        _message.author.name, _message.author.discriminator))
+                    self.session.add(_user)
+                    self.session.flush()
 
-        elif self.user.id in map(lambda x: x.id, message.mentions) and len(message.content.split(' ')) > 1:
+            return _user
+>>>>>>> upstream/master
 
-            command = message.content.split(' ')[1]
-            stripped = (message.content + ' ').split(' ', 2)[-1].strip()
+        if message.author.bot or \
+                message.content is None or \
+                (message.guild is not None and len(message.content.split(' ')[0]) < 2) or \
+                message.tts or \
+                len(message.attachments) > 0 or \
+                self.match_string is None:
 
-        elif isinstance(message.channel, discord.DMChannel):
+            # either a bot or cannot be a command
+            return
 
-            command = message.content.split(' ')[0]
-            stripped = message.content[len(command) + 1:]
+        elif message.guild is None:
+            with self.get_session() as session:
+                # command has been DMed. dont check for prefix :)
+                split = message.content.split(' ')
 
-        else:
-            return False
+                command_word = split[0]
+                args = ' '.join(split[1:]).strip()
 
-        command = command.lower()
+                if command_word in self.command_names:
+                    command = self.commands[command_word]
 
-        if command in self.commands.keys():
-            if server is not None and not message.content.startswith(
-                    ('{}help'.format(prefix), '{}blacklist'.format(prefix))):
+                    if command.allowed_dm:
+                        # get user
+                        user = await _get_user(message)
 
-                channel = self.session.query(Blacklist).filter(Blacklist.channel == message.channel.id)
+                        await command.func(message, args, Preferences(None, user))
+                        session.commit()
 
-                if channel.count() > 0:
-                    await message.channel.send(embed=discord.Embed(description=info.language.get_string(self.session, 'blacklisted')))
-                    return False
+        elif _check_self_permissions(message.channel):
+            with self.get_session() as session:
+                # command sent in guild. check for prefix & call
+                match = re.match(
+                    self.match_string,
+                    message.content,
+                    re.MULTILINE | re.DOTALL
+                )
 
-            command_form: Command = self.commands[command]
+                if match is not None:
+                    # matched command structure; now query for guild to compare prefix
+                    guild = session.query(Guild).filter(Guild.guild == message.guild.id).first()
+                    if guild is None:
+                        guild = Guild(guild=message.guild.id)
 
-            if command_form.allowed_dm or server is not None:
+                        session.add(guild)
+                        session.flush()
 
-                permission_check_status: bool = True
+                # if none, suggests mention has been provided instead since pattern still matched
+                if (prefix := match.group('prefix')) in (guild.prefix, None):
+                    # prefix matched, might as well get the user now since this is a very small subset of messages
+                    user = await _get_user(message)
 
-                if server is not None and command_form.permission_level == PermissionLevels.RESTRICTED:
-                    if not message.author.guild_permissions.manage_guild:
-                        permission_check_status = False
+                    if guild not in user.guilds:
+                        guild.users.append(user)
 
-                        await message.channel.send(info.language.get_string(self.session, 'no_perms_restricted'))
+                    # create the nice info manager
+                    info = Preferences(guild, user)
 
-                elif server is not None and command_form.permission_level == PermissionLevels.MANAGED:
-                    restrict = server.command_restrictions \
-                        .filter(CommandRestriction.command == command) \
-                        .filter(CommandRestriction.role.in_([x.id for x in message.author.roles]))
+                    command_word = match.group('cmd')
+                    stripped = match.group('args') or ''
+                    command = self.commands[command_word]
 
-                    if restrict.count() == 0 and not message.author.guild_permissions.manage_messages:
-                        permission_check_status = False
+                    # some commands dont get blacklisted e.g help, blacklist
+                    if command.blacklists:
+                        channel, just_created = Channel.get_or_create(message.channel)
 
+                        if channel.guild_id is None:
+                            channel.guild_id = guild.id
+
+                        if channel.blacklisted:
+                            await message.channel.send(
+                                embed=discord.Embed(description=info.language.get_string(self.session, 'blacklisted')))
+                            return
+
+                    # blacklist checked; now do command permissions
+                    if command.check_permissions(message.author, guild):
+                        if message.guild.me.guild_permissions.manage_webhooks:
+                            await command.func(message, stripped, info)
+                            session.commit()
+
+                        else:
+                            await message.channel.send(info.language.get_string(self.session, 'no_perms_webhook'))
+
+                    else:
                         await message.channel.send(
-                            info.language.get_string(self.session, 'no_perms_managed').format(prefix=info.prefix))
-
-                if permission_check_status:
-                    if server is not None and not message.guild.me.guild_permissions.manage_webhooks:
-                        await message.channel.send(info.language.get_string(self.session, 'no_perms_webhook'))
-                        return False
-
-                    elif server is not None and not message.channel.permissions_for(message.guild.me).embed_links:
-                        await message.channel.send(info.language.get_string(self.session, 'no_perms_embed_links'))
-                        return False
-
-                    await command_form.func(message, stripped, info)
-                    return True
-
-                else:
-                    return False
-
-            else:
-                return False
+                            info.language.get_string(
+                                str(command.permission_level)).format(prefix=prefix))
 
         else:
-            return False
+            return
 
-    async def help(self, message, _stripped, preferences):
-        await message.channel.send(embed=discord.Embed(description=preferences.language.get_string(self.session, 'help')))
+    async def time_stats(self, message, *_):
+        uptime: float = unix_time() - self.start_time
+
+        message_ts: float = message.created_at.timestamp()
+
+        m: discord.Message = await message.channel.send('.')
+
+        ping: float = m.created_at.timestamp() - message_ts
+
+        await m.edit(content='''
+        Uptime: {}s
+        Ping: {}ms
+        '''.format(round(uptime), round(ping * 1000)))
+
+    @staticmethod
+    async def help(message, _stripped, preferences):
+        await message.channel.send(embed=discord.Embed(
+            description=preferences.language.get_string(self.session, 'help'),
+            color=THEME_COLOR
+        ))
 
     async def info(self, message, _stripped, preferences):
         await message.channel.send(embed=discord.Embed(
-            description=preferences.language.get_string(self.session, 'info').format(prefix=preferences.prefix, user=self.user.name)))
+            description=preferences.language.get_string(self.session, 'info').format(prefix=preferences.prefix, user=self.user.name),
+            color=THEME_COLOR
+        ))
 
-    async def donate(self, message, _stripped, preferences):
-        await message.channel.send(embed=discord.Embed(description=preferences.language.get_string(self.session, 'donate')))
+    @staticmethod
+    async def donate(message, _stripped, preferences):
+        await message.channel.send(embed=discord.Embed(
+            description=preferences.language.get_string(self.session, 'donate'),
+            color=THEME_COLOR
+        ))
 
     async def change_prefix(self, message, stripped, preferences):
 
@@ -433,7 +468,7 @@ class BotClient(discord.AutoShardedClient):
                 embed=discord.Embed(description=preferences.language.get_string(self.session, 'lang/invalid').format(
                     '\n'.join(
                         ['{} ({})'.format(lang.name.title(), lang.code.upper()) for lang in self.session.query(Language)])
-                    )
+                )
                 )
             )
 
@@ -456,7 +491,7 @@ class BotClient(discord.AutoShardedClient):
         message_crop = stripped.split(server.language.get_string(self.session, 'natural/send'), 1)[1]
         datetime_obj = await self.do_blocking(partial(dateparser.parse, time_crop, settings={
             'TIMEZONE': server.timezone,
-            'TO_TIMEZONE': self.config.localzone,
+            'TO_TIMEZONE': self.config.local_timezone,
             'RELATIVE_BASE': datetime.now(pytz.timezone(server.timezone)).replace(tzinfo=None),
             'PREFER_DATES_FROM': 'future'
         }))
@@ -532,10 +567,15 @@ class BotClient(discord.AutoShardedClient):
             await message.channel.send(
                 embed=discord.Embed(description=server.language.get_string(self.session, 'natural/bulk_set').format(successes)))
 
-    async def remind(self, message, stripped, server):
+    async def remind_cmd(self, message, stripped, server):
+        await self.remind(False, message, stripped, server)
+
+    async def interval_cmd(self, message, stripped, server):
+        await self.remind(True, message, stripped, server)
+
+    async def remind(self, is_interval, message, stripped, server):
 
         args = stripped.split(' ')
-        is_interval = message.content[1] == 'i'
 
         if len(args) < 2:
             if is_interval:
@@ -594,13 +634,7 @@ class BotClient(discord.AutoShardedClient):
 
     async def create_reminder(self, message: discord.Message, location: int, text: str, time: int,
                               interval: typing.Optional[int] = None, method: str = 'natural') -> ReminderInformation:
-        nudge_channel: ChannelNudge = self.session.query(ChannelNudge).filter(
-            ChannelNudge.channel == location).first()  # check if it's being nudged
-
         ut: float = unix_time()
-
-        if nudge_channel is not None:
-            time += nudge_channel.time
 
         if time > ut + MAX_TIME:
             return ReminderInformation(CreateReminderResponse.LONG_TIME)
@@ -613,30 +647,36 @@ class BotClient(discord.AutoShardedClient):
             else:
                 return ReminderInformation(CreateReminderResponse.PAST_TIME)
 
-        url: typing.Optional[str] = None
+        channel: typing.Optional[Channel] = None
+        user: typing.Optional[User] = None
+
         # noinspection PyUnusedLocal
-        channel: typing.Optional[typing.Union[discord.TextChannel, DMChannelId]] = None
+        discord_channel: typing.Optional[typing.Union[discord.TextChannel, DMChannelId]] = None
 
+        # command fired inside a guild
         if message.guild is not None:
-            channel = message.guild.get_channel(location)
+            discord_channel = message.guild.get_channel(location)
 
-            if channel is not None:  # if not a DM reminder
+            if discord_channel is not None:  # if not a DM reminder
 
-                hooks = [x for x in await channel.webhooks() if x.user.id == self.user.id]
-                hook = hooks[0] if len(hooks) > 0 else await channel.create_webhook(name='Reminders')
-                url = hook.url
+                channel, _ = Channel.get_or_create(discord_channel)
+
+                await channel.attach_webhook(discord_channel)
+
+                time += channel.nudge
 
             else:
-                member = await self.find_member(location, message.guild)
+                user = await self.find_and_create_member(location, message.guild)
 
-                if member is None or member.dm_channel is None:
+                if user is None:
                     return ReminderInformation(CreateReminderResponse.INVALID_TAG)
 
-                else:
-                    channel = DMChannelId(member.dm_channel, member.user)
+                discord_channel = DMChannelId(user.dm_channel, user.user)
 
+        # command fired in a DM; only possible target is the DM itself
         else:
-            channel = message.channel
+            user = User.from_discord(message.author)
+            discord_channel = DMChannelId(user.dm_channel, message.author.id)
 
         if interval is not None:
             if MIN_INTERVAL > interval:
@@ -646,11 +686,11 @@ class BotClient(discord.AutoShardedClient):
                 return ReminderInformation(CreateReminderResponse.LONG_INTERVAL)
 
             else:
+                # noinspection PyArgumentList
                 reminder = Reminder(
                     message=Message(content=text),
-                    channel=channel.id,
+                    channel=channel or user.channel,
                     time=time,
-                    webhook=url,
                     enabled=True,
                     method=method,
                     interval=interval)
@@ -658,20 +698,20 @@ class BotClient(discord.AutoShardedClient):
                 self.session.commit()
 
         else:
+            # noinspection PyArgumentList
             r = Reminder(
                 message=Message(content=text),
-                channel=channel.id,
+                channel=channel or user.channel,
                 time=time,
-                webhook=url,
                 enabled=True,
                 method=method)
             self.session.add(r)
             self.session.commit()
 
-        return ReminderInformation(CreateReminderResponse.OK, channel=channel, time=time)
+        return ReminderInformation(CreateReminderResponse.OK, channel=discord_channel, time=time)
 
+    @staticmethod
     async def timer(self, message, stripped, preferences):
-
         owner: int = message.guild.id
 
         if message.guild is None:
@@ -730,52 +770,26 @@ class BotClient(discord.AutoShardedClient):
         else:
             await message.channel.send(preferences.language.get_string(self.session, 'timer/help'))
 
-    async def blacklist(self, message, _stripped, preferences):
+    @staticmethod
+    async def blacklist(self, message, _, preferences):
 
-        if len(message.channel_mentions) > 0:
-            disengage_all = True
+        target_channel = message.channel_mentions[0] if len(message.channel_mentions) > 0 else message.channel
 
-            all_channels = set(
-                [x.channel for x in self.session.query(Blacklist).filter(Blacklist.guild_id == message.guild.id)])
-            c = set([x.id for x in message.channel_mentions])
+        channel, _ = Channel.get_or_create(target_channel)
 
-            for mention in message.channel_mentions:
-                if mention.id not in all_channels:
-                    disengage_all = False
+        channel.blacklisted = not channel.blacklisted
 
-            if disengage_all:
-                channels = c & all_channels
-                self.session.query(Blacklist).filter(Blacklist.channel.in_(channels)).delete(synchronize_session='fetch')
-
-                await message.channel.send(
-                    embed=discord.Embed(description=preferences.language.get_string(self.session, 'blacklist/removed_from')))
-
-            else:
-                channels = [x for x in c if x not in all_channels]
-                for channel in channels:
-                    blacklist = Blacklist(channel=channel, guild_id=message.guild.id)
-                    self.session.add(blacklist)
-
-                await message.channel.send(
-                    embed=discord.Embed(description=preferences.language.get_string(self.session, 'blacklist/added_from')))
+        if channel.blacklisted:
+            await message.channel.send(
+                embed=discord.Embed(description=preferences.language.get_string(self.session, 'blacklist/added')))
 
         else:
-            q = self.session.query(Blacklist).filter(Blacklist.channel == message.channel.id)
-
-            if q.count() > 0:
-                q.delete(synchronize_session='fetch')
-                await message.channel.send(
-                    embed=discord.Embed(description=preferences.language.get_string(self.session, 'blacklist/removed')))
-
-            else:
-                blacklist = Blacklist(channel=message.channel.id, guild_id=message.guild.id)
-                self.session.add(blacklist)
-                await message.channel.send(
-                    embed=discord.Embed(description=preferences.language.get_string(self.session, 'blacklist/added')))
+            await message.channel.send(
+                embed=discord.Embed(description=preferences.language.get_string(self.session, 'blacklist/removed')))
 
         self.session.commit()
 
-    async def restrict(self, message, stripped, prefs):
+    async def restrict(self, message, stripped, preferences):
 
         role_tag = re.search(r'<@&([0-9]+)>', stripped)
 
@@ -786,9 +800,10 @@ class BotClient(discord.AutoShardedClient):
                 # no parameters given so just show existing
                 await message.channel.send(
                     embed=discord.Embed(
-                        description=prefs.language.get_string(self.session, 'restrict/allowed').format(
+                        description=preferences.language.get_string(self.session, 'restrict/allowed').format(
                             '\n'.join(
-                                ['<@&{}> can use `{}`'.format(r.role, r.command) for r in prefs.command_restrictions]
+                                ['<@&{}> can use `{}`'.format(r.role, r.command)
+                                 for r in preferences.command_restrictions]
                             )
                         )
                     )
@@ -796,14 +811,15 @@ class BotClient(discord.AutoShardedClient):
 
             else:
                 # only a role is given so delete all the settings for this role
-                prefs.command_restrictions.filter(CommandRestriction.role == int(role_tag.group(1))).delete(
+                preferences.command_restrictions.filter(CommandRestriction.role == int(role_tag.group(1))).delete(
                     synchronize_session='fetch')
                 await message.channel.send(
-                    embed=discord.Embed(description=prefs.language.get_string(self.session, 'restrict/disabled')))
+                    embed=discord.Embed(description=preferences.language.get_string(self.session, 'restrict/disabled')))
 
         elif role_tag is None:
             # misused- show help
-            await message.channel.send(embed=discord.Embed(description=prefs.language.get_string(self.session, 'restrict/help')))
+            await message.channel.send(embed=discord.Embed(
+                description=preferences.language.get_string(self.session, 'restrict/help')))
 
         else:
             # enable permissions for role for selected commands
@@ -813,7 +829,7 @@ class BotClient(discord.AutoShardedClient):
                 c: typing.Optional[Command] = self.commands.get(command)
 
                 if c is not None and c.permission_level == PermissionLevels.MANAGED:
-                    q = prefs.command_restrictions \
+                    q = preferences.command_restrictions \
                         .filter(CommandRestriction.command == command) \
                         .filter(CommandRestriction.role == role_id)
 
@@ -824,35 +840,36 @@ class BotClient(discord.AutoShardedClient):
 
                 else:
                     await message.channel.send(embed=discord.Embed(
-                        description=prefs.language.get_string(self.session, 'restrict/failure').format(command=command)))
+                        description=preferences.language.get_string(self.session, 'restrict/failure').format(command=command)))
 
-            await message.channel.send(embed=discord.Embed(description=prefs.language.get_string(self.session, 'restrict/enabled')))
+            await message.channel.send(embed=discord.Embed(
+                description=preferences.language.get_string(self.session, 'restrict/enabled')))
 
         self.session.commit()
 
     async def todo(self, message, stripped, preferences):
         if 'todos' in message.content.split(' ')[0]:
-            location = message.guild.id
+            location = preferences.guild
             name = message.guild.name
             command = 'todos'
         else:
-            location = message.author.id
+            location = preferences.user
             name = message.author.name
             command = 'todo'
 
-        todos = self.session.query(Todo).filter(Todo.owner == location).all()
+        todos = location.todo_list
 
         splits = stripped.split(' ')
 
         if len(splits) == 1 and splits[0] == '':
-            msg = ['\n{}: {}'.format(i + 1, todo.value) for i, todo in enumerate(todos)]
+            msg = ['\n{}: {}'.format(i, todo.value) for i, todo in enumerate(todos, start=1)]
             if len(msg) == 0:
                 msg.append(preferences.language.get_string(self.session, 'todo/add').format(
                     prefix=preferences.prefix, command=command))
 
             s = ''
             for item in msg:
-                if len(item) + len(s) < 2000:
+                if len(item) + len(s) < 2048:
                     s += item
                 else:
                     await message.channel.send(
@@ -869,8 +886,8 @@ class BotClient(discord.AutoShardedClient):
             if splits[0] == 'add':
                 a = ' '.join(splits[1:])
 
-                todo = Todo(owner=location, value=a)
-                self.session.add(todo)
+                todo = Todo(value=a)
+                location.todo_list.append(todo)
                 await message.channel.send(preferences.language.get_string(self.session, 'todo/added').format(name=a))
 
             elif splits[0] == 'remove':
@@ -895,7 +912,7 @@ class BotClient(discord.AutoShardedClient):
 
         else:
             if stripped == 'clear':
-                self.session.query(Todo).filter(Todo.owner == location).delete(synchronize_session='fetch')
+                todos.clear()
                 await message.channel.send(preferences.language.get_string(self.session, 'todo/cleared'))
 
             else:
@@ -904,63 +921,58 @@ class BotClient(discord.AutoShardedClient):
 
         self.session.commit()
 
-    async def delete(self, message, _stripped, preferences):
+    @staticmethod
+    async def delete(message, _stripped, preferences):
         if message.guild is not None:
-            li = [ch.id for ch in message.guild.channels]  # get all channels and their ids in the current server
+            channels = preferences.guild.channels
+            reminders = itertools.chain(*[c.reminders for c in channels])
+
         else:
-            li = [message.channel.id]
+            reminders = preferences.user.channel.reminders
 
         await message.channel.send(preferences.language.get_string(self.session, 'del/listing'))
 
-        n = 1
-
-        reminders = self.session.query(Reminder).filter(Reminder.channel.in_(li)).all()
+        enumerated_reminders = [x for x in enumerate(reminders, start=1)]
 
         s = ''
-        for reminder in reminders:
-            string = '''**{}**: '{}' *<#{}>*\n'''.format(
-                n,
-                await self.clean_string(reminder.message_content(), message.guild),
+        for count, reminder in enumerated_reminders:
+            string = '''**{}**: '{}' *{}*\n'''.format(
+                count,
+                reminder.message_content(),
                 reminder.channel)
 
             if len(s) + len(string) > 2000:
-                await message.channel.send(s)
+                await message.channel.send(s, allowed_mentions=NoMention)
                 s = string
             else:
                 s += string
 
-            n += 1
-
         if s:
-            await message.channel.send(s)
+            await message.channel.send(s, allowed_mentions=NoMention)
 
         await message.channel.send(preferences.language.get_string(self.session, 'del/listed'))
 
         num = await client.wait_for('message',
                                     check=lambda m: m.author == message.author and m.channel == message.channel)
-        nums = [n.strip() for n in num.content.split(',')]
 
-        deletion_count: int = 0
-        for i in nums:
-            try:
-                i = int(i) - 1
-                if i < 0:
-                    continue
+        num_content = num.content.replace(',', ' ')
 
-                self.session.query(Reminder).filter(Reminder.id == reminders[i].id).delete(synchronize_session='fetch')
+        nums = set([int(x) for x in re.findall(r'(\d+)(?:\s|$)', num_content)])
 
-                print('Deleted reminder')
-                deletion_count += 1
+        removal_ids: typing.Set[int] = set()
 
-            except ValueError:
-                continue
-            except IndexError:
-                continue
+        for count, reminder in enumerated_reminders:
+            if count in nums:
+                removal_ids.add(reminder.id)
+                nums.remove(count)
 
-        await message.channel.send(preferences.language.get_string(self.session, 'del/count').format(deletion_count))
+        self.session.query(Reminder).filter(Reminder.id.in_(removal_ids)).delete(synchronize_session='fetch')
         self.session.commit()
 
-    async def look(self, message, stripped, prefs):
+        await message.channel.send(preferences.language.get_string(self.session, 'del/count').format(len(removal_ids)))
+
+    @staticmethod
+    async def look(message, stripped, preferences):
 
         r = re.search(r'(\d+)', stripped)
 
@@ -968,45 +980,66 @@ class BotClient(discord.AutoShardedClient):
         if r is not None:
             limit = int(r.groups()[0])
 
-        channel = message.channel_mentions[0] if len(message.channel_mentions) > 0 else message.channel
-        channel = channel.id
-
-        if limit is not None:
-            reminders = self.session.query(Reminder).filter(Reminder.channel == channel).order_by(Reminder.time).limit(limit)
+        if 'enabled' in stripped:
+            show_disabled = False
         else:
-            reminders = self.session.query(Reminder).filter(Reminder.channel == channel).order_by(Reminder.time)
+            show_disabled = True
 
-        if reminders.count() > 0:
+        if message.guild is None:
+            channel = preferences.user.channel
+            new = False
+
+        else:
+            discord_channel = message.channel_mentions[0] if len(message.channel_mentions) > 0 else message.channel
+
+            channel, new = Channel.get_or_create(discord_channel)
+
+        if new:
+            await message.channel.send(preferences.language.get_string(self.session, 'look/no_reminders'))
+
+        else:
+            reminder_query = channel.reminders.order_by(Reminder.time)
+
+            if not show_disabled:
+                reminder_query = reminder_query.filter(Reminder.enabled)
+
             if limit is not None:
-                await message.channel.send(prefs.language.get_string(self.session, 'look/listing_limited').format(reminders.count()))
+                reminder_query = reminder_query.limit(limit)
+
+            if reminder_query.count() > 0:
+                if limit is not None:
+                    await message.channel.send(preferences.language.get_string(self.session, 'look/listing_limited').format(
+                        reminder_query.count()))
+
+                else:
+                    await message.channel.send(preferences.language.get_string(self.session, 'look/listing'))
+
+                s = ''
+                for reminder in reminder_query:
+                    string = '\'{}\' *{}* **{}** {}\n'.format(
+                        reminder.message_content(),
+                        preferences.language.get_string(self.session, 'look/inter'),
+                        datetime.fromtimestamp(reminder.time, pytz.timezone(preferences.timezone)).strftime(
+                            '%Y-%m-%d %H:%M:%S'),
+                        '' if reminder.enabled else '`disabled`')
+
+                    if len(s) + len(string) > 2000:
+                        await message.channel.send(s, allowed_mentions=NoMention)
+                        s = string
+                    else:
+                        s += string
+
+                await message.channel.send(s, allowed_mentions=NoMention)
 
             else:
-                await message.channel.send(prefs.language.get_string(self.session, 'look/listing'))
-
-            s = ''
-            for reminder in reminders:
-                string = '\'{}\' *{}* **{}**\n'.format(
-                    await self.clean_string(reminder.message_content(), message.guild),
-                    prefs.language.get_string(self.session, 'look/inter'),
-                    datetime.fromtimestamp(reminder.time, pytz.timezone(prefs.timezone)).strftime('%Y-%m-%d %H:%M:%S'))
-
-                if len(s) + len(string) > 2000:
-                    await message.channel.send(s)
-                    s = string
-                else:
-                    s += string
-
-            await message.channel.send(s)
-
-        else:
-            await message.channel.send(prefs.language.get_string(self.session, 'look/no_reminders'))
+                await message.channel.send(preferences.language.get_string(self.session, 'look/no_reminders'))
 
     async def offset_reminders(self, message, stripped, preferences):
 
         if message.guild is None:
-            channels = [message.channel.id]
+            reminders = preferences.user.reminders
         else:
-            channels = [x.id for x in message.guild.channels]
+            reminders = itertools.chain(*[channel.reminders for channel in preferences.guild.channels])
 
         time_parser = TimeExtractor(stripped, preferences.timezone)
 
@@ -1023,8 +1056,6 @@ class BotClient(discord.AutoShardedClient):
                     description=preferences.language.get_string(self.session, 'offset/help').format(prefix=preferences.prefix)))
 
             else:
-                reminders = self.session.query(Reminder).filter(Reminder.channel.in_(channels))
-
                 for r in reminders:
                     r.time += time
 
@@ -1045,19 +1076,19 @@ class BotClient(discord.AutoShardedClient):
                 description=preferences.language.get_string(self.session, 'nudge/invalid_time')))
 
         else:
-            query = self.session.query(ChannelNudge).filter(ChannelNudge.channel == message.channel.id)
+            if 2 ** 15 > t > -2 ** 15:
+                channel, _ = Channel.get_or_create(message.channel)
 
-            if query.count() < 1:
-                new = ChannelNudge(channel=message.channel.id, time=t)
-                self.session.add(new)
+                channel.nudge = t
+
+                self.session.commit()
+
+                await message.channel.send(
+                    embed=discord.Embed(description=preferences.language.get_string(self.session, 'nudge/success').format(t)))
 
             else:
-                query.first().time = t
-
-            self.session.commit()
-
-            await message.channel.send(
-                embed=discord.Embed(description=preferences.language.get_string(self.session, 'nudge/success').format(t)))
+                await message.channel.send(
+                    embed=discord.Embed(description=preferences.language.get_string(self.session, 'nudge/invalid_time')))
 
 
 client = BotClient(max_messages=100, guild_subscriptions=False, fetch_offline_members=False)
