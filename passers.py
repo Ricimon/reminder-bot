@@ -2,7 +2,7 @@ import discord
 import sqlalchemy
 
 from enums import PermissionLevels, CreateReminderResponse
-from models import Guild, User, Language, ENGLISH_STRINGS, CommandRestriction
+from models import Guild, User, Language, ENGLISH_STRINGS, CommandRestriction, Role
 import typing
 
 
@@ -27,7 +27,8 @@ class Command:
             else:
                 restrict = guild_data.command_restrictions \
                     .filter(CommandRestriction.command == self.name) \
-                    .filter(CommandRestriction.role.in_([x.id for x in member.roles]))
+                    .join(CommandRestriction.role) \
+                    .filter(Role.role.in_([x.id for x in member.roles]))
 
                 return restrict.count() != 0
 

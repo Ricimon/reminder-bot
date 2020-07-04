@@ -1,10 +1,10 @@
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import Column, Integer, BigInteger, String, Text, Boolean, Table, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, Boolean, Table, ForeignKey, UniqueConstraint
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session, relationship, backref
-from sqlalchemy.dialects.mysql import BIGINT, MEDIUMINT, SMALLINT, INTEGER as INT
+from sqlalchemy.dialects.mysql import BIGINT, MEDIUMINT, SMALLINT, INTEGER as INT, TIMESTAMP, ENUM
 import configparser
-import time
+from datetime import datetime
 import typing
 import secrets
 
@@ -14,8 +14,10 @@ Base = declarative_base()
 
 guild_users = Table('guild_users',
                     Base.metadata,
-                    Column('guild', INT(unsigned=True), ForeignKey('guilds.id')),
-                    Column('user', INT(unsigned=True), ForeignKey('users.id')),
+                    Column('guild', INT(unsigned=True), ForeignKey('guilds.id', ondelete='CASCADE'), nullable=False),
+                    Column('user', INT(unsigned=True), ForeignKey('users.id', ondelete='CASCADE'), nullable=False),
+                    Column('can_access', Boolean, nullable=False, default=False),
+                    UniqueConstraint('guild', 'user'),
                     )
 
 
@@ -39,6 +41,21 @@ class Guild(Base):
 
     # populated later in file
     command_restrictions = None
+    roles = None
+
+
+class CommandAlias(Base):
+    __tablename__ = 'command_aliases'
+
+    id = Column(INT(unsigned=True), primary_key=True)
+
+    guild_id = Column(INT(unsigned=True), ForeignKey(Guild.id, ondelete='CASCADE'), nullable=False)
+    guild = relationship(Guild, backref='aliases')
+    name = Column(String(12), nullable=False)
+
+    command = Column(String(2048), nullable=False)
+
+    UniqueConstraint('guild_id', 'name')
 
 
 class Channel(Base):
@@ -54,6 +71,9 @@ class Channel(Base):
 
     webhook_id = Column(BIGINT(unsigned=True), unique=True)
     webhook_token = Column(Text)
+
+    paused = Column(Boolean, nullable=False, default=False)
+    paused_until = Column(TIMESTAMP)
 
     guild_id = Column(INT(unsigned=True), ForeignKey(Guild.id, ondelete='CASCADE'))
     guild = relationship(Guild, backref='channels')
@@ -104,7 +124,20 @@ class Role(Base):
     name = Column(String(100))
 
     role = Column(BIGINT(unsigned=True), unique=True, nullable=False)
-    guild_id = Column(INT(unsigned=True), ForeignKey(Guild.id), nullable=False)
+    guild_id = Column(INT(unsigned=True), ForeignKey(Guild.id, ondelete='CASCADE'), nullable=False)
+
+    def __eq__(self, v):
+        if isinstance(v, int):
+            return self.role == v
+
+        elif isinstance(v, Role):
+            return self.id == v.id
+
+        else:
+            return False
+
+    def __str__(self):
+        return '<@&{}>'.format(self.role)
 
 
 class User(Base):
@@ -120,7 +153,7 @@ class User(Base):
     allowed_dm = Column(Boolean, default=True, nullable=False)
 
     patreon = Column(Boolean, nullable=False, default=False)
-    dm_channel = Column(INT(unsigned=True), ForeignKey('channels.id'), nullable=False)
+    dm_channel = Column(INT(unsigned=True), ForeignKey('channels.id', ondelete='SET NULL'), nullable=False)
     channel = relationship(Channel)
 
     def __repr__(self):
@@ -178,7 +211,7 @@ class Message(Base):
 
     content = Column(String(2048), nullable=False, default='')
 
-    embed_id = Column(INT(unsigned=True), ForeignKey(Embed.id))
+    embed_id = Column(INT(unsigned=True), ForeignKey(Embed.id, ondelete='CASCADE'))
     embed = relationship(Embed)
 
 
@@ -190,10 +223,10 @@ class Reminder(Base):
 
     name = Column(String(24), default='Reminder')
 
-    message_id = Column(INT(unsigned=True), ForeignKey(Message.id), nullable=False)
+    message_id = Column(INT(unsigned=True), ForeignKey(Message.id, ondelete='RESTRICT'), nullable=False)
     message = relationship(Message)
 
-    channel_id = Column(INT(unsigned=True), ForeignKey(Channel.id), nullable=True)
+    channel_id = Column(INT(unsigned=True), ForeignKey(Channel.id, ondelete='CASCADE'), nullable=True)
 
     time = Column(INT(unsigned=True))
     enabled = Column(Boolean, nullable=False, default=True)
@@ -203,8 +236,11 @@ class Reminder(Base):
                     nullable=False)
     username = Column(String(32), default='Reminder', nullable=False)
 
-    method = Column(String(9))
     interval = Column(INT(unsigned=True))
+
+    method = Column(ENUM('remind', 'natural', 'dashboard', 'todo'))
+    set_by = Column(INT(unsigned=True), ForeignKey(User.id, ondelete='SET NULL'), nullable=True)
+    set_at = Column(TIMESTAMP, nullable=True, default=datetime.now, server_default='CURRENT_TIMESTAMP()')
 
     @staticmethod
     def create_uid() -> str:
@@ -233,22 +269,44 @@ class Todo(Base):
 
     id = Column(INT(unsigned=True), primary_key=True)
 
-    user_id = Column(INT(unsigned=True), ForeignKey(User.id))
-    user = relationship(User, backref='todo_list')
-    guild_id = Column(INT(unsigned=True), ForeignKey(Guild.id))
-    guild = relationship(Guild, backref='todo_list')
+    user_id = Column(INT(unsigned=True), ForeignKey(User.id, ondelete='CASCADE'))
+    guild_id = Column(INT(unsigned=True), ForeignKey(Guild.id, ondelete='CASCADE'))
+    channel_id = Column(INT(unsigned=True), ForeignKey(Channel.id, ondelete='SET NULL'))
 
     value = Column(String(2000), nullable=False)
+
+
+User.todo_list = relationship(Todo, backref='user', lazy='dynamic')
+Guild.todo_list = relationship(Todo, backref='guild', lazy='dynamic')
+Channel.todo_list = relationship(Todo, backref='channel', lazy='dynamic')
 
 
 class Timer(Base):
     __tablename__ = 'timers'
 
-    id = Column(Integer, primary_key=True)
+    id = Column(INT(unsigned=True), primary_key=True)
 
-    start_time = Column(Integer, default=time.time, nullable=False)
+    start_time = Column(TIMESTAMP, default=datetime.now, server_default='CURRENT_TIMESTAMP()', nullable=False)
     name = Column(String(32), nullable=False)
-    owner = Column(BigInteger, nullable=False)
+    owner = Column(BIGINT(unsigned=True), nullable=False)
+
+
+class Event(Base):
+    __tablename__ = 'events'
+
+    id = Column(INT(unsigned=True), primary_key=True)
+    time = Column(TIMESTAMP, default=datetime.now, server_default='CURRENT_TIMESTAMP()', nullable=False)
+
+    event_name = Column(ENUM('edit', 'enable', 'disable', 'delete'), nullable=False)
+    bulk_count = Column(INT(unsigned=True))
+
+    guild_id = Column(INT(unsigned=True), ForeignKey(Guild.id, ondelete='CASCADE'), nullable=False)
+    guild = relationship(Guild)
+
+    user_id = Column(INT(unsigned=True), ForeignKey(User.id, ondelete='SET NULL'))
+    user = relationship(User)
+
+    reminder_id = Column(INT(unsigned=True), ForeignKey(Reminder.id, ondelete='SET NULL'))
 
 
 class Language(Base):
@@ -271,12 +329,16 @@ class CommandRestriction(Base):
 
     id = Column(Integer, primary_key=True)
 
-    guild_id = Column(BigInteger, ForeignKey(Guild.guild, ondelete='CASCADE'), nullable=False)
-    role = Column(BigInteger, nullable=False)
-    command = Column(String(16))
+    guild_id = Column(INT(unsigned=True), ForeignKey(Guild.id, ondelete='CASCADE'), nullable=False)
+    role_id = Column(INT(unsigned=True), ForeignKey(Role.id, ondelete='CASCADE'), nullable=False)
+    role = relationship(Role)
+    command = Column(ENUM('todos', 'natural', 'remind', 'interval', 'timer', 'del', 'look'), nullable=False)
+
+    UniqueConstraint('role_id', 'command')
 
 
 Guild.command_restrictions = relationship(CommandRestriction, backref='guild', lazy='dynamic')
+Guild.roles = relationship(Role, backref='guild', lazy='dynamic')
 
 config = configparser.ConfigParser()
 config.read('config.ini')
@@ -318,6 +380,7 @@ Strings = Table('strings', Base.metadata,
                 )
                 )
 
-ENGLISH_STRINGS: typing.Optional[Language] = session.query(Language).filter(Language.code == 'EN').first()
+ENGLISH_STRINGS: typing.Optional[Language] = session.query(Language) \
+    .filter(Language.code == config.get('DEFAULT', 'local_language')).first()
 
 Session.remove()
