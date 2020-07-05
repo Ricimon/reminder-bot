@@ -6,4 +6,4 @@ WORKDIR /src
 COPY pyproject.toml poetry.lock poetry.toml ./
 RUN poetry install
 COPY . .
-CMD ["./docker/client/run.sh"]
+CMD ["./docker/run.sh"]

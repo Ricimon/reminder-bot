@@ -105,4 +105,4 @@ ENV/
 
 # project specific files
 config.ini
-docker/db/db-password
+docker/db-password

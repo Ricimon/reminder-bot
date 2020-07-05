@@ -8,7 +8,7 @@ services:
   client:
     build:
       context: .
-      dockerfile: ./docker/client/Dockerfile
+      dockerfile: ./docker/Dockerfile
     restart: unless-stopped
     volumes:
       - ./config.ini:/src/config.ini
@@ -16,9 +16,7 @@ services:
       - "db"
 
   db:
-    build:
-      context: .
-      dockerfile: ./docker/db/Dockerfile
+    image: mariadb:10.5.4
     environment:
       MYSQL_RANDOM_ROOT_PASSWORD: 'true'
       MYSQL_DATABASE: reminders
@@ -27,4 +25,5 @@ services:
     restart: unless-stopped
     volumes:
       - db-data:/var/lib/mysql
-      - ./docker/db/db-password:/run/secrets/mysql-password
+      - ./docker/db-password:/run/secrets/mysql-password
+      - ./create.sql:/docker-entrypoint-initdb.d/01-create.sql
