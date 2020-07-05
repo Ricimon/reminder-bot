@@ -5,3 +5,6 @@
 [submodule "postman-rs"]
 	path = postman-rs
 	url = https://github.com/reminder-bot/postman-rs
+[submodule "docker/wait-for-it"]
+	path = docker/wait-for-it
+	url = https://github.com/vishnubob/wait-for-it

@@ -13,8 +13,7 @@ CREATE TABLE reminders.guilds (
     default_username VARCHAR(32) DEFAULT 'Reminder' NOT NULL,
     default_avatar VARCHAR(512) DEFAULT 'https://raw.githubusercontent.com/reminder-bot/logos/master/Remind_Me_Bot_Logo_PPic.jpg' NOT NULL,
 
-    PRIMARY KEY (id),
-    FOREIGN KEY (default_channel_id) REFERENCES reminders.channels(id) ON DELETE SET NULL
+    PRIMARY KEY (id)
 );
 
 CREATE TABLE reminders.channels (
@@ -37,6 +36,8 @@ CREATE TABLE reminders.channels (
     PRIMARY KEY (id),
     FOREIGN KEY (guild_id) REFERENCES reminders.guilds(id) ON DELETE CASCADE
 );
+
+ALTER TABLE guilds ADD CONSTRAINT fk_guilds FOREIGN KEY (default_channel_id) REFERENCES reminders.channels(id) ON DELETE SET NULL;
 
 CREATE TABLE reminders.users (
     id INT UNSIGNED AUTO_INCREMENT UNIQUE NOT NULL,

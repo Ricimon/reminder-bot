@@ -1,3 +1,7 @@
+.git
+.gitignore
+docker-compose.yml
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -102,6 +106,8 @@ ENV/
 
 # JetBrains intellij
 .idea/
+
+.travis.yml
 
 # project specific files
 config.ini

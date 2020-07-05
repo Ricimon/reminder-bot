@@ -5,14 +5,26 @@ volumes:
     name: reminder-bot-db
 
 services:
+  client:
+    build:
+      context: .
+      dockerfile: ./docker/client/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ./config.ini:/src/config.ini
+    depends_on:
+      - "db"
+
   db:
     build:
       context: .
       dockerfile: ./docker/db/Dockerfile
-    ports:
-      - "3306:3306"
     environment:
       MYSQL_RANDOM_ROOT_PASSWORD: 'true'
       MYSQL_DATABASE: reminders
+      MYSQL_USER: reminderbot
+      MYSQL_PASSWORD_FILE: '/run/secrets/mysql-password'
+    restart: unless-stopped
     volumes:
       - db-data:/var/lib/mysql
+      - ./docker/db/db-password:/run/secrets/mysql-password
