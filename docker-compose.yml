@@ -1,0 +1,18 @@
+version: "3.8"
+
+volumes:
+  db-data:
+    name: reminder-bot-db
+
+services:
+  db:
+    build:
+      context: .
+      dockerfile: ./docker/db/Dockerfile
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_RANDOM_ROOT_PASSWORD: 'true'
+      MYSQL_DATABASE: reminders
+    volumes:
+      - db-data:/var/lib/mysql
