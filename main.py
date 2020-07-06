@@ -545,6 +545,7 @@ class BotClient(discord.AutoShardedClient):
         message_crop = stripped.split(server.language.get_string(self.session, 'natural/send'), 1)[1]
         datetime_obj = await self.do_blocking(partial(dateparser.parse, time_crop, settings={
             'TIMEZONE': server.timezone,
+            'TO_TIMEZONE': self.config.local_timezone,
             'RELATIVE_BASE': datetime.now(pytz.timezone(server.timezone)).replace(tzinfo=None),
             'PREFER_DATES_FROM': 'future'
         }))

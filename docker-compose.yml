@@ -8,10 +8,20 @@ services:
   client:
     build:
       context: .
-      dockerfile: ./docker/Dockerfile
+      dockerfile: ./docker/client/Dockerfile
     restart: unless-stopped
     volumes:
       - ./config.ini:/src/config.ini
+    depends_on:
+      - "db"
+
+  postman:
+    build:
+      context: .
+      dockerfile: ./docker/postman/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ./postman-rs/.env:/app/.env
     depends_on:
       - "db"
 
@@ -26,4 +36,3 @@ services:
     volumes:
       - db-data:/var/lib/mysql
       - ./docker/db-password:/run/secrets/mysql-password
-        #- ./create.sql:/docker-entrypoint-initdb.d/01-create.sql
