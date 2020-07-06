@@ -1,10 +1,9 @@
 [submodule "languages"]
 	path = languages
-	url = https://github.com/reminder-bot/languages
-
+	url = git@github.com:Ricimon/reminder-bot-languages
 [submodule "postman-rs"]
 	path = postman-rs
-	url = https://github.com/reminder-bot/postman-rs
+	url = git@github.com:Ricimon/reminder-bot-postman
 [submodule "docker/wait-for-it"]
 	path = docker/wait-for-it
 	url = https://github.com/vishnubob/wait-for-it
