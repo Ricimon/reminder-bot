@@ -265,7 +265,7 @@ class BotClient(discord.AutoShardedClient):
                             # get user
                             user = await _get_user(message)
 
-                            await command.func(message, args, Preferences(None, user))
+                            await command.func(message, args, Preferences(None, user, session))
 
         elif _check_self_permissions(message.channel):
             with self.get_session() as session:
@@ -276,7 +276,9 @@ class BotClient(discord.AutoShardedClient):
                     re.MULTILINE | re.DOTALL | re.IGNORECASE
                 )
 
-                if match is not None:
+                if match is None:
+                    return
+                else:
                     # matched command structure; now query for guild to compare prefix
                     guild = session.query(Guild).filter(Guild.guild == message.guild.id).first()
                     if guild is None:
@@ -294,7 +296,7 @@ class BotClient(discord.AutoShardedClient):
                         guild.users.append(user)
 
                     # create the nice info manager
-                    info = Preferences(guild, user)
+                    info = Preferences(guild, user, session)
 
                     command_word = match.group('cmd').lower()
                     stripped = match.group('args') or ''
@@ -302,7 +304,7 @@ class BotClient(discord.AutoShardedClient):
 
                     # some commands dont get blacklisted e.g help, blacklist
                     if command.blacklists:
-                        channel, just_created = Channel.get_or_create(message.channel)
+                        channel, just_created = Channel.get_or_create(session, message.channel)
 
                         if channel.guild_id is None:
                             channel.guild_id = guild.id
@@ -543,10 +545,10 @@ class BotClient(discord.AutoShardedClient):
         message_crop = stripped.split(server.language.get_string(self.session, 'natural/send'), 1)[1]
         datetime_obj = await self.do_blocking(partial(dateparser.parse, time_crop, settings={
             'TIMEZONE': server.timezone,
-            'TO_TIMEZONE': self.config.local_timezone,
             'RELATIVE_BASE': datetime.now(pytz.timezone(server.timezone)).replace(tzinfo=None),
             'PREFER_DATES_FROM': 'future'
         }))
+        datetime_obj = pytz.timezone(self.config.local_timezone).localize(datetime_obj)
 
         if datetime_obj is None:
             await message.channel.send(
@@ -605,7 +607,7 @@ class BotClient(discord.AutoShardedClient):
             if td.days != 0: offset += f"{td.days} day{'s' if td.days > 1 else ''}, "
             if hours != 0: offset += f"{hours} hour{'s' if hours > 1 else ''}, "
             if minutes != 0: offset += f"{minutes} minute{'s' if minutes > 1 else ''}, "
-            offset += str(seconds)
+            offset += f"{seconds} second{'s' if seconds != 1 else ''}"
 
             response = server.language.get_string(self.session, string).format(location=result.location.mention,
                                                                                offset=offset,
@@ -713,7 +715,7 @@ class BotClient(discord.AutoShardedClient):
         channel: typing.Optional[Channel] = None
         user: typing.Optional[User] = None
 
-        creator: User = User.from_discord(message.author)
+        creator: User = User.from_discord(self.session, message.author)
 
         # noinspection PyUnusedLocal
         discord_channel: typing.Optional[typing.Union[discord.TextChannel, DMChannelId]] = None
@@ -724,7 +726,7 @@ class BotClient(discord.AutoShardedClient):
 
             if discord_channel is not None:  # if not a DM reminder
 
-                channel, _ = Channel.get_or_create(discord_channel)
+                channel, _ = Channel.get_or_create(self.session, discord_channel)
 
                 await channel.attach_webhook(discord_channel)
 
@@ -740,7 +742,7 @@ class BotClient(discord.AutoShardedClient):
 
         # command fired in a DM; only possible target is the DM itself
         else:
-            user = User.from_discord(message.author)
+            user = User.from_discord(self.session, message.author)
             discord_channel = DMChannelId(user.dm_channel, message.author.id)
 
         if interval is not None:
@@ -842,7 +844,7 @@ class BotClient(discord.AutoShardedClient):
 
         target_channel = message.channel_mentions[0] if len(message.channel_mentions) > 0 else message.channel
 
-        channel, _ = Channel.get_or_create(target_channel)
+        channel, _ = Channel.get_or_create(self.session, target_channel)
 
         channel.blacklisted = not channel.blacklisted
 
@@ -942,7 +944,7 @@ class BotClient(discord.AutoShardedClient):
 
     async def todo_command(self, message, stripped, preferences, command):
         if command == 'todos':
-            location, _ = Channel.get_or_create(message.channel)
+            location, _ = Channel.get_or_create(self.session, message.channel)
             name = 'Channel'
             todos = location.todo_list.all() + preferences.guild.todo_list.filter(Todo.channel_id.is_(None)).all()
             channel = location
@@ -1117,7 +1119,7 @@ class BotClient(discord.AutoShardedClient):
         else:
             discord_channel = message.channel_mentions[0] if len(message.channel_mentions) > 0 else message.channel
 
-            channel, new = Channel.get_or_create(discord_channel)
+            channel, new = Channel.get_or_create(self.session, discord_channel)
 
         if new:
             await message.channel.send(preferences.language.get_string(self.session, 'look/no_reminders'))
@@ -1208,7 +1210,7 @@ class BotClient(discord.AutoShardedClient):
 
         else:
             if 2 ** 15 > t > -2 ** 15:
-                channel, _ = Channel.get_or_create(message.channel)
+                channel, _ = Channel.get_or_create(self.session, message.channel)
 
                 channel.nudge = t
 
@@ -1223,7 +1225,7 @@ class BotClient(discord.AutoShardedClient):
 
     async def pause_channel(self, message, stripped, preferences):
 
-        channel, _ = Channel.get_or_create(message.channel)
+        channel, _ = Channel.get_or_create(self.session, message.channel)
 
         if len(stripped) > 0:
             # argument provided for time

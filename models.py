@@ -1,5 +1,6 @@
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import Column, Integer, String, Text, Boolean, Table, ForeignKey, UniqueConstraint
+from sqlalchemy import text
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session, relationship, backref
 from sqlalchemy.dialects.mysql import BIGINT, MEDIUMINT, SMALLINT, INTEGER as INT, TIMESTAMP, ENUM
@@ -85,7 +86,7 @@ class Channel(Base):
         return '<#{}>'.format(self.channel)
 
     @classmethod
-    def get_or_create(cls, finding_channel) -> ('Channel', bool):
+    def get_or_create(cls, session, finding_channel) -> ('Channel', bool):
         c = session.query(cls).filter(cls.channel == finding_channel.id).first()
         new = False
 
@@ -153,7 +154,7 @@ class User(Base):
     allowed_dm = Column(Boolean, default=True, nullable=False)
 
     patreon = Column(Boolean, nullable=False, default=False)
-    dm_channel = Column(INT(unsigned=True), ForeignKey('channels.id', ondelete='SET NULL'), nullable=False)
+    dm_channel = Column(INT(unsigned=True), ForeignKey('channels.id', ondelete='SET NULL'))
     channel = relationship(Channel)
 
     def __repr__(self):
@@ -163,7 +164,7 @@ class User(Base):
         return self.name or str(self.user)
 
     @classmethod
-    def from_discord(cls, finding_user):
+    def from_discord(cls, session, finding_user):
         return session.query(cls).filter(cls.user == finding_user.id).first()
 
     async def update_details(self, new_details):
@@ -171,27 +172,6 @@ class User(Base):
 
         if self.dm_channel is None:
             self.dm_channel = (await new_details.create_dm()).id
-
-
-class User(Base):
-    __tablename__ = 'users'
-
-    id = Column(Integer, primary_key=True, nullable=False)
-    user = Column(BigInteger, nullable=False)
-
-    language = Column( String(2), default='EN', nullable=False )
-    timezone = Column( String(32), nullable=True )
-    allowed_dm = Column( Boolean, default=True, nullable=False )
-
-    patreon = Column( Boolean, nullable=False, default=False )
-    dm_channel = Column(BigInteger)
-    name = Column(String(37))  # sized off 32 char username + # + 4 char discriminator
-
-    def __repr__(self):
-        return self.name or str(self.user)
-
-    def __str__(self):
-        return self.name or str(self.user)
 
 
 class Embed(Base):
@@ -240,7 +220,7 @@ class Reminder(Base):
 
     method = Column(ENUM('remind', 'natural', 'dashboard', 'todo'))
     set_by = Column(INT(unsigned=True), ForeignKey(User.id, ondelete='SET NULL'), nullable=True)
-    set_at = Column(TIMESTAMP, nullable=True, default=datetime.now, server_default='CURRENT_TIMESTAMP()')
+    set_at = Column(TIMESTAMP, nullable=True, default=datetime.now, server_default=text('CURRENT_TIMESTAMP'))
 
     @staticmethod
     def create_uid() -> str:
@@ -286,7 +266,7 @@ class Timer(Base):
 
     id = Column(INT(unsigned=True), primary_key=True)
 
-    start_time = Column(TIMESTAMP, default=datetime.now, server_default='CURRENT_TIMESTAMP()', nullable=False)
+    start_time = Column(TIMESTAMP, default=datetime.now, server_default=text('CURRENT_TIMESTAMP'), nullable=False)
     name = Column(String(32), nullable=False)
     owner = Column(BIGINT(unsigned=True), nullable=False)
 
@@ -295,7 +275,7 @@ class Event(Base):
     __tablename__ = 'events'
 
     id = Column(INT(unsigned=True), primary_key=True)
-    time = Column(TIMESTAMP, default=datetime.now, server_default='CURRENT_TIMESTAMP()', nullable=False)
+    time = Column(TIMESTAMP, default=datetime.now, server_default=text('CURRENT_TIMESTAMP'), nullable=False)
 
     event_name = Column(ENUM('edit', 'enable', 'disable', 'delete'), nullable=False)
     bulk_count = Column(INT(unsigned=True))

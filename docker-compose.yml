@@ -26,4 +26,4 @@ services:
     volumes:
       - db-data:/var/lib/mysql
       - ./docker/db-password:/run/secrets/mysql-password
-      - ./create.sql:/docker-entrypoint-initdb.d/01-create.sql
+        #- ./create.sql:/docker-entrypoint-initdb.d/01-create.sql

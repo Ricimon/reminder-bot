@@ -9,9 +9,9 @@ python = "^3.8"
 dateparser = "^0.7.2"
 sqlalchemy = "^1.3.13"
 pytz = "^2019.3"
-"discord.py" = "^1.3.0a"
 pymysql = "^0.9.3"
 tinyconf = "^0.3.0"
+"discord.py" = {git = "https://github.com/Rapptz/discord.py", rev = "e971e2f"}
 
 [tool.poetry.dev-dependencies]
 Mypy = "^0.761"

@@ -1,5 +1,5 @@
 FROM python:3.8-alpine
-RUN apk add --no-cache netcat-openbsd gcc musl-dev libffi-dev openssl-dev bash && \
+RUN apk add --no-cache netcat-openbsd gcc musl-dev libffi-dev openssl-dev bash git && \
     pip install poetry
 COPY docker/wait-for-it/wait-for-it.sh /bin/
 WORKDIR /src
