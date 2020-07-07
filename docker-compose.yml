@@ -26,12 +26,12 @@ services:
       - "db"
 
   db:
-    image: mariadb:10.5.4
+    image: linuxserver/mariadb
     environment:
-      MYSQL_RANDOM_ROOT_PASSWORD: 'true'
+      FILE__MYSQL_ROOT_PASSWORD: '/run/secrets/mysql-password'
       MYSQL_DATABASE: reminders
       MYSQL_USER: reminderbot
-      MYSQL_PASSWORD_FILE: '/run/secrets/mysql-password'
+      FILE__MYSQL_PASSWORD: '/run/secrets/mysql-password'
     restart: unless-stopped
     volumes:
       - db-data:/var/lib/mysql
