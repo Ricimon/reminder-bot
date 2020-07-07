@@ -55,7 +55,7 @@ docker-compose up -d
 ##### Deps:
 
 * Python 3.8+
-* MySQL 8+
+* MySQL 5+
 * libmysqlclient21 and libmysqlclient-dev
 	* *Debian* `sudo apt-get install default-libmysqlclient-dev libssl-dev`
 * Poetry
