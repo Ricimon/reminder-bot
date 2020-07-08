@@ -103,6 +103,9 @@ ENV/
 # JetBrains intellij
 .idea/
 
+*.vim
+
+
 # project specific files
 config.ini
 docker/db-password
