@@ -109,6 +109,9 @@ ENV/
 
 .travis.yml
 
+*.vim
+
+
 # project specific files
 config.ini
 docker/db-password
