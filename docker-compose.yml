@@ -11,7 +11,7 @@ services:
       dockerfile: ./docker/client/Dockerfile
     restart: unless-stopped
     volumes:
-      - ./config.ini:/src/config.ini
+      - ./config.ini:/src/config.ini:ro
     depends_on:
       - "db"
 
@@ -21,7 +21,7 @@ services:
       dockerfile: ./docker/postman/Dockerfile
     restart: unless-stopped
     volumes:
-      - ./postman-rs/.env:/app/.env
+      - ./postman-rs/.env:/app/.env:ro
     depends_on:
       - "db"
 
@@ -36,4 +36,4 @@ services:
     restart: unless-stopped
     volumes:
       - db-data:/var/lib/mysql
-      - ./docker/db-password:/run/secrets/mysql-password
+      - ./docker/db-password:/run/secrets/mysql-password:ro
